@@ -1,0 +1,62 @@
+{
+  "summary": "Frontend-only test of Suvera FLOW login + unauth flows. Login screen renders correctly (logo, email/password, show/hide toggle, submit). Empty submit shows exact validation 'Enter your email and password.'. Submitting md@demo.test / MdUser@12345 against the unreachable external backend (https://suveraflow.in - confirmed TLS/connect failure, net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH) correctly surfaces the network banner 'Cannot reach the Suvera FLOW server. Check your connection.' with no crash. Unauth navigation to /console, /reception, /admin all redirect to /login via the RoleTabs guard. HOWEVER, /history and /audit have NO auth guard: they render for unauthenticated users and fire protected API calls, which is a security/UX bug. Deprecated 'shadow*' style props warning observed (should migrate to boxShadow).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/history.tsx",
+        "issue": "No auth guard. Unauthenticated direct navigation to /history renders the HistoryView screen and fires GET /api/visits/history?range=week without a token. Expected: redirect to /login like RoleTabs does.",
+        "testID": "history-screen",
+        "priority": "HIGH"
+      },
+      {
+        "component": "app/audit.tsx",
+        "issue": "No auth guard. Unauthenticated direct navigation to /audit renders the screen and fires GET /api/admin/audit without a token (useQuery has no 'enabled: status===signedIn'). Expected: redirect to /login.",
+        "testID": "audit-screen",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "global",
+        "issues": [
+          "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Appears on every screen load — a shared UI component (likely in src/components/ui.tsx or theme) still uses shadowColor/shadowOpacity/shadowRadius/shadowOffset. Migrate to boxShadow for RN 0.76+."
+        ]
+      }
+    ],
+    "react_native_issues": [
+      {
+        "component": "shadow* style props",
+        "issue": "Deprecated 'shadow*' style props detected in console warnings on every screen. React Native 0.76+ expects 'boxShadow'. Reference: src/components/ui.tsx / src/theme.ts (grep for shadowColor/shadowOpacity)."
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Add auth guard to /app/frontend/app/history.tsx and /app/frontend/app/audit.tsx (mirror RoleTabs: if status==='signedOut' return <Redirect href=\"/login\" />; optionally restrict audit to role==='admin'). Also gate the useQuery with enabled: status==='signedIn'.",
+    "Migrate deprecated 'shadow*' React Native style props to 'boxShadow' (check src/components/ui.tsx and src/theme.ts).",
+    "No action for external backend — confirmed unreachable (TLS handshake failure) as per the problem statement; the app already handles it gracefully."
+  ],
+  "critical_code_review_comments": [
+    "src/api.ts: Correctly converts network/TLS failures into ApiError(0, 'Cannot reach the Suvera FLOW server. Check your connection.'). Good.",
+    "src/auth.tsx: login() flow is clean; token+user persisted via secure storage; setUnauthorizedHandler wired to clearSession on 401. Good.",
+    "src/queue.ts: useQueueState is correctly gated with enabled: status==='signedIn' — unauth users won't fire /api/queue/state. Good.",
+    "src/LiveSync.tsx: WebSocket only connects when status==='signedIn' && token — safe.",
+    "src/components/RoleTabs.tsx: Properly redirects signedOut -> /login and wrong-role -> homeFor(user.role). Good.",
+    "app/history.tsx and app/audit.tsx: MISSING auth guard — security/UX regression. They render for unauth users and fire authenticated API calls.",
+    "app/_layout.tsx + app/index.tsx: Root wiring correct; shows splash while fonts load, index redirects based on auth status.",
+    "app/console/_layout.tsx, app/reception/_layout.tsx, app/admin/_layout.tsx: All call useQueueState() at layout level. Because useQueueState is gated by auth status, no unauthenticated API fire — Good.",
+    "login.tsx: Validation and error UI match the requirement exactly, including testIDs login-logo, login-email-input, login-password-input, login-toggle-password, login-submit-button, login-error-text."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only, external backend intentionally unreachable)", "frontend": "90% (login flows pass; /history and /audit missing auth guards)"},
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "External backend https://suveraflow.in is intentionally down (TLS handshake failure / Cloudflare 1001). Do NOT create a local backend. Login flow (render, validation, network-error banner) works perfectly. RoleTabs guards for /console, /reception, /admin all redirect unauth to /login. Only /history and /audit lack guards — retest after main agent adds Redirect. Mobile viewport 390x844 used.",
+  "rca_of_issue": "Root cause for /history and /audit bug: these screens are top-level routes in app/ but do not use the RoleTabs guard pattern. app/history.tsx and app/audit.tsx render immediately and invoke useQuery with no auth-status gate, so an unauthenticated visitor sees a protected screen's shell and triggers an unauthenticated API call. Reproduction: in a fresh/incognito session navigate directly to /history or /audit — the screens render and SSL/network errors fire against the backend. Mitigation: at the top of each screen component, add: const { status, user } = useAuth(); if (status === 'signedOut') return <Redirect href='/login' />; (and for /audit optionally gate on user?.role === 'admin'). Additionally pass enabled: status === 'signedIn' to the useQuery calls in HistoryView and audit.tsx."
+}
