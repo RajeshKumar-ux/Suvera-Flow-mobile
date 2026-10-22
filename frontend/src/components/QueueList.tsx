@@ -1,11 +1,12 @@
+import Ionicons from "@react-native-vector-icons/ionicons";
 import React, { useMemo, useState } from "react";
-import { FlatList, RefreshControl, ScrollView, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { errorMessage } from "@/src/api";
 import { usesNativeTabs } from "@/src/navigation";
-import { ActionKey, actionsFor, FINAL, getHosts, getVisitors, HELD, useQueueActions, useQueueState, Visitor, WAITING } from "@/src/queue";
-import { makeStyles, useTheme } from "@/src/theme";
+import { ActionKey, actionsFor, FINAL, getHosts, getVisitors, HELD, useQueueActions, useQueueState, Visitor, visitorName, visitorNumber, WAITING } from "@/src/queue";
+import { fonts, makeStyles, useTheme } from "@/src/theme";
 import { ReasonSheet } from "./ReasonSheet";
 import { Chip, EmptyState, ErrorBanner, LoadingBlock } from "./ui";
 import { VisitorCard } from "./VisitorCard";
@@ -36,7 +37,9 @@ export function QueueList({
   header,
   emptyTitle = "No visitors right now",
   emptyBody = "New visitors appear here automatically.",
+  searchable,
 }: {
+  searchable?: boolean;
   mode: "console" | "reception" | "admin";
   showHost?: boolean;
   filters?: Filter[];
@@ -52,6 +55,7 @@ export function QueueList({
   const q = useQueueState();
   const { busy, act } = useQueueActions();
   const [filter, setFilter] = useState(filters[0]?.key ?? "all");
+  const [search, setSearch] = useState("");
   const [sheet, setSheet] = useState<{ v: Visitor; a: ActionKey } | null>(null);
 
   const hosts = getHosts(q.data);
@@ -60,8 +64,18 @@ export function QueueList({
     if (baseStatuses) vs = vs.filter((v) => baseStatuses.includes(v.status));
     const f = filters.find((x) => x.key === filter);
     if (f?.statuses) vs = vs.filter((v) => f.statuses!.includes(v.status));
+    const term = search.trim().toLowerCase();
+    if (term) {
+      const digits = term.replace(/\D/g, "");
+      vs = vs.filter((v) => {
+        const name = String(visitorName(v)).toLowerCase();
+        const phone = String(v.phone ?? v.mobile ?? "").replace(/\D/g, "");
+        const num = String(visitorNumber(v) ?? "");
+        return name.includes(term) || String(v.company ?? "").toLowerCase().includes(term) || (digits.length > 0 && (phone.includes(digits) || num === digits));
+      });
+    }
     return vs;
-  }, [q.data, filter, filters, baseStatuses]);
+  }, [q.data, filter, filters, baseStatuses, search]);
 
   const onAction = (v: Visitor, a: ActionKey) => {
     if (a === "reject" || a === "hold" || a === "cancel") setSheet({ v, a });
@@ -70,6 +84,30 @@ export function QueueList({
 
   return (
     <View style={{ flex: 1 }}>
+      {searchable ? (
+        <View style={styles.searchBar}>
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={20} color={colors.muted} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search name, phone or token"
+              placeholderTextColor={colors.muted}
+              style={styles.searchInput}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+              clearButtonMode="never"
+              testID="queue-search-input"
+            />
+            {search ? (
+              <Pressable onPress={() => setSearch("")} hitSlop={10} style={styles.clearBtn} testID="queue-search-clear">
+                <Ionicons name="close-circle" size={20} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
       {filters.length > 1 ? (
         <View style={styles.chipBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
@@ -90,7 +128,17 @@ export function QueueList({
             {header}
           </>
         }
-        ListEmptyComponent={q.isLoading ? <LoadingBlock /> : <EmptyState icon="people-outline" title={emptyTitle} body={emptyBody} testID="queue-empty-state" />}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        ListEmptyComponent={
+          q.isLoading ? (
+            <LoadingBlock />
+          ) : search.trim() ? (
+            <EmptyState icon="search-outline" title="No matching visitors" body={`Nothing matches “${search.trim()}” today.`} testID="queue-search-empty" />
+          ) : (
+            <EmptyState icon="people-outline" title={emptyTitle} body={emptyBody} testID="queue-empty-state" />
+          )
+        }
         renderItem={({ item, index }) => (
           <VisitorCard visitor={item} hosts={hosts} showHost={showHost} actions={actionsFor(item, mode)} busy={busy} onAction={(a) => onAction(item, a)} index={index} />
         )}
@@ -112,6 +160,10 @@ export function QueueList({
 }
 
 const useStyles = makeStyles((c) => ({
+  searchBar: { paddingHorizontal: 16, paddingTop: 12, backgroundColor: c.surface },
+  searchBox: { flexDirection: "row", alignItems: "center", gap: 8, height: 48, paddingLeft: 14, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surfaceSecondary },
+  searchInput: { flex: 1, height: 48, fontFamily: fonts.body, fontSize: 16, color: c.onSurface },
+  clearBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   chipBar: { height: 56, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border, justifyContent: "center" },
   chips: { gap: 8, paddingHorizontal: 16, alignItems: "center" },
 }));
